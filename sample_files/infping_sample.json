@@ -1,0 +1,23 @@
+{
+	"influx": {
+		"host": "172.17.0.2",
+		"port": "8086",
+		"user": "",
+		"pass": "",
+		"secure": false,
+		"db": "infping"
+	},
+	"infping": {
+		"backoff": "1",
+		"retries": "0",
+		"tos": "0",
+		"summary": "10",
+		"period": "1000",
+		"custom": {}
+	},
+	"hosts": [
+			"google.es",
+			"google.com"
+		]
+}
+
