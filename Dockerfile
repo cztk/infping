@@ -1,4 +1,5 @@
-FROM golang:alpine AS build-env
+ARG ARCH=amd64
+FROM ${ARCH}/golang:alpine AS build-env
 COPY . $GOPATH/src/github.com/nickvanw/infping
 WORKDIR $GOPATH/src/github.com/nickvanw/infping
 RUN apk --update add git && go get -v && go build -o /infping
