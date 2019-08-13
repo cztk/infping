@@ -51,7 +51,7 @@ func main() {
 	viper.SetDefault("fping.summary", "10")
 	viper.SetDefault("fping.period", "1000")
 	viper.SetDefault("fping.custom", map[string]string{})
-	viper.SetDefault("hosts.hosts", []string{"localhost"})
+	viper.SetDefault("hosts", []string{"localhost"})
 
 	viper.SetConfigName("infping")
 	viper.AddConfigPath("/etc/")
@@ -73,7 +73,7 @@ func main() {
 	influxDB := viper.GetString("influx.db")
 	influxRetPolicy := viper.GetString("influx.policy")
 
-	hosts := viper.GetStringSlice("hosts.hosts")
+	hosts := viper.GetStringSlice("hosts")
 
 	u, err := url.Parse(fmt.Sprintf("%s://%s:%s", influxScheme, influxHost, influxPort))
 	if err != nil {
