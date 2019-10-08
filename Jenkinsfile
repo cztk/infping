@@ -7,69 +7,69 @@ def getNodeHostname() {
 }
 
 def getGitTag() {
-  dir ('src/github.com/amgxv/infping') {
-    println('trying to get git tag')
-    GIT_TAG = sh(script: 'git describe --abbrev=0 --tags', returnStdout: true).trim()
-    println('detected tag : '+GIT_TAG)
-  }  
+  echo 'trying to get git tag'
+  GIT_TAG = sh(script: 'git tag -l --contains HEAD', returnStdout: true).trim()
+  echo "detected tag : ${GIT_TAG}"
+  GIT_COMMIT_DESCRIPTION = sh(script: 'git log -n1 --pretty=format:%B', returnStdout: true).trim()
+  echo "current description : ${GIT_COMMIT_DESCRIPTION}"
 }
 
-def buildDockerImage(image,arch,tag) {
-  dir ('src/github.com/amgxv/infping') {
-    script {
-      img = docker.build("${image}:${arch}-${tag}", "--pull --build-arg ARCH=${arch} -f docker/Dockerfile .")
-    }
-  }    
+def buildDockerImage(image, arch, tag) {
+  return docker.build("${image}:${arch}-${tag}", "--pull --build-arg ARCH=${arch} -f docker/Dockerfile .")
 }
 
-def pushDockerImage(arch,tag) {
-  def githubImage = "docker.pkg.github.com/amgxv/infping/infping-$arch:$tag"
+def pushDockerImage(img, arch, tag) {
+  def githubImage = "docker.pkg.github.com/majorcadevs/infping/infping-$arch:$tag"
   script {
     docker.withRegistry('https://registry.hub.docker.com', 'amgxv_dockerhub') { 
       img.push("${arch}-${tag}")  
     }
+
     docker.withRegistry('https://docker.pkg.github.com', 'amgxv-github-token') {
       sh "docker image tag ${img.id} ${githubImage}"
       docker.image(githubImage).push()  
-    }    
+    }
   }
 }
 
-def goBuild(arch, gopath) {
-  def envVars = ['GOPATH=' + gopath, "GOARCH=${arch}", 'GOCACHE=' + gopath + '/.go-cache']
+def goBuild(arch, os, gopath) {
+  def envVars = ["GOPATH=${gopath}", "GOARCH=${arch}", "GOOS=${os}", "GOCACHE=${gopath}/.go-cache"]
   if(arch == 'arm32v7') {
     envVars.add 'GOARM=7'
   }
 
+  def exeName = "infping-${os}-${arch}"
   withEnv(envVars) {
-    sh 'go get -d -v ./...'
-    sh 'go build -o infping-' + arch + ' -v ./...'
+    sh 'go get -v'
+    sh "go build -o ${exeName} -v"
   }
+
+  return exeName
 }
 
-def checkoutAndBuild(arch) {
-  def gopath = pwd()
-  dir ('src/github.com/amgxv/infping') {
-    GIT_COMMIT_DESCRIPTION = sh(script: 'git log -n1 --pretty=format:%B | cat', returnStdout: true).trim()
-    echo "current description : ${GIT_COMMIT_DESCRIPTION}"
-    goBuild(arch, gopath)
-    archiveArtifacts artifacts: "infping-${arch}", fingerprint: true
-  }  
+def buildExecutable(arch, os) {
+  def gopath = pwd() + '/.go'
+  sh "mkdir -p ${gopath}"
+
+  def exeName = goBuild(arch, os, gopath)
+  archiveArtifacts artifacts: exeName, fingerprint: true
 }
 
 def uploadArtifacts() {
-  println('artifact with tag : '+ GIT_TAG)
-  unarchive mapping: ['*': '.']  
+  echo "artifact with tag : ${GIT_TAG}"
+  unarchive mapping: ['*': '.']
   githubRelease(
     'amgxv-github-token',
     'amgxv/infping',
     "${GIT_TAG}",
     "infping - Release ${GIT_TAG}",
-    'Parse fping output, store result in influxdb - '+ GIT_COMMIT_DESCRIPTION,
+    "Parse fping output, store result in influxdb - ${GIT_COMMIT_DESCRIPTION}",
     [
-      ['infping-amd64', 'application/octet-stream'],
-      ['infping-arm', 'application/octet-stream'],
-      ['infping-arm64', 'application/octet-stream']
+      ['infping-linux-amd64', 'application/octet-stream'],
+      ['infping-linux-arm', 'application/octet-stream'],
+      ['infping-linux-arm64', 'application/octet-stream'],
+      ['infping-darwin-amd64', 'application/octet-stream'],
+      ['infping-windows-amd64', 'application/octet-stream'],
     ]
   )
 }
@@ -77,9 +77,7 @@ def uploadArtifacts() {
 
 pipeline {
   agent { label '!docker-qemu' }
-  options { checkoutToSubdirectory('src/github.com/amgxv/infping')}
   environment {
-    img = ''
     image = 'amgxv/infping'
     chatId = credentials('amgxv-telegram-chatid')
     GIT_COMMIT_DESCRIPTION = ''
@@ -87,7 +85,6 @@ pipeline {
   }
 
   stages {
-
     stage('Preparation') {
       steps {
         telegramSend 'infping is being built [here](' + env.BUILD_URL + ')... ', chatId
@@ -95,111 +92,112 @@ pipeline {
     }
 
     stage ('Build Docker Images') {
-
-        parallel {
-          stage ('docker-amd64') {
-            agent {
-              label 'docker-qemu'
-            }
-
-            environment {
-              arch = 'amd64'
-              tag = 'latest'
-              img = null
-            }
-
-            stages {
-
-              stage ('Current Node') {
-                steps {
-                  getNodeHostname()
-                }
-              }
-
-              stage ('Build') {
-                steps {
-                  buildDockerImage(image,arch,tag)
-                }
-              }
-
-              stage ('Push') {
-                steps {
-                  pushDockerImage(arch,tag)
-                }
-              }
-            }
+      parallel {
+        stage ('docker-amd64') {
+          agent {
+            label 'docker-qemu'
           }
 
-          stage ('docker-arm64') {
-            agent {
-              label 'docker-qemu'
-            }
-
-            environment {
-              arch = 'arm64v8'
-              tag = 'latest'
-              img = null
-            }
-
-            stages {
-
-              stage ('Current Node') {
-                steps {
-                  getNodeHostname()
-                }
-              }
-
-              stage ('Build') {
-                steps {
-                  buildDockerImage(image,arch,tag)
-                }
-              }
-
-              stage ('Push') {
-                steps {
-                  pushDockerImage(arch,tag)
-                }
-              }
-            }
+          environment {
+            arch = 'amd64'
+            tag = 'latest'
+            img = null
           }
 
-          stage ('docker-arm32') {
-            agent {
-              label 'docker-qemu'
+          stages {
+            stage ('Current Node') {
+              steps {
+                getNodeHostname()
+              }
             }
 
-            environment {
-              arch = 'arm32v7'
-              tag = 'latest'
-              img = null
+            stage ('Build') {
+              steps {
+                script {
+                  img = buildDockerImage(image, arch, tag)
+                }
+              }
             }
 
-            stages {
-
-              stage ('Current Node') {
-                steps {
-                  getNodeHostname()
-                }
-              }
-
-              stage ('Build') {
-                steps {
-                  buildDockerImage(image,arch,tag)
-                }
-              }
-
-              stage ('Push') {
-                steps {
-                  pushDockerImage(arch,tag)
-                }
+            stage ('Push') {
+              steps {
+                pushDockerImage(img, arch, tag)
               }
             }
           }
         }
-      }  
+
+        stage ('docker-arm64') {
+          agent {
+            label 'docker-qemu'
+          }
+
+          environment {
+            arch = 'arm64v8'
+            tag = 'latest'
+            img = null
+          }
+
+          stages {
+            stage ('Current Node') {
+              steps {
+                getNodeHostname()
+              }
+            }
+
+            stage ('Build') {
+              steps {
+                script {
+                  img = buildDockerImage(image, arch, tag)
+                }
+              }
+            }
+
+            stage ('Push') {
+              steps {
+                pushDockerImage(img, arch, tag)
+              }
+            }
+          }
+        }
+
+        stage ('docker-arm32') {
+          agent {
+            label 'docker-qemu'
+          }
+
+          environment {
+            arch = 'arm32v7'
+            tag = 'latest'
+            img = null
+          }
+
+          stages {
+            stage ('Current Node') {
+              steps {
+                getNodeHostname()
+              }
+            }
+
+            stage ('Build') {
+              steps {
+                script {
+                  img = buildDockerImage(image, arch, tag)
+                }
+              }
+            }
+
+            stage ('Push') {
+              steps {
+                pushDockerImage(img, arch, tag)
+              }
+            }
+          }
+        }
+      }
+    }
 
     stage('Update manifest (Only Dockerhub)') {
-
       agent {
         label 'docker-qemu'
       }
@@ -217,7 +215,6 @@ pipeline {
 
     stage ('Build Go Binaries') {
       parallel {
-
         stage ('amd64') {
           agent {
             docker {
@@ -226,12 +223,12 @@ pipeline {
           }
 
           environment {
+            os = 'linux'
             arch = 'amd64'
-            tag = 'latest'
           }
 
           steps {
-            checkoutAndBuild(arch)
+            buildExecutable(arch, os)
           }
         }
 
@@ -243,12 +240,12 @@ pipeline {
           }
 
           environment {
+            os = 'linux'
             arch = 'arm'
-            tag = 'latest'
           }
 
           steps {
-            checkoutAndBuild(arch)
+            buildExecutable(arch, os)
           }
         }
 
@@ -260,31 +257,70 @@ pipeline {
           }
 
           environment {
+            os = 'linux'
             arch = 'arm64'
-            tag = 'latest'
           }
 
           steps {
-            checkoutAndBuild(arch)
+            buildExecutable(arch, os)
           }
-        }                            
+        }
+
+        stage ('darwin-amd64') {
+          agent {
+            docker {
+              image 'golang:buster'
+            }
+          }
+
+          environment {
+            os = 'darwin'
+            arch = 'amd64'
+          }
+
+          steps {
+            buildExecutable(arch, os)
+          }
+        }
+
+        stage ('windows-amd64') {
+          agent {
+            docker {
+              image 'golang:buster'
+            }
+          }
+
+          environment {
+            os = 'windows'
+            arch = 'amd64'
+          }
+
+          steps {
+            buildExecutable(arch, os)
+          }
+        }
       }
     }
 
-  stage ('Get Git Tag'){
-    agent { label 'majorcadevs'}
+  stage ('Get Git Tag') {
+    agent { label 'majorcadevs' }
     steps {
       getGitTag()
     }
   }
 
   stage('Upload Release to Github') {
-      agent { label 'majorcadevs'}
-      when { expression { "${GIT_TAG}" != null } }
-      steps {
-          uploadArtifacts()
+      agent { label 'majorcadevs' }
+      when {
+        expression {
+          GIT_TAG != null && GIT_TAG != ''
+        }
       }
-    }    
+
+      steps {
+        uploadArtifacts()
+      }
+    }
   }    
     
   post {
@@ -292,6 +328,7 @@ pipeline {
       cleanWs()
       telegramSend 'infping has been built successfully. ', chatId
     }
+
     failure {
       cleanWs()
       telegramSend 'infping could not have been built.\n\nSee [build log](' + env.BUILD_URL + ')... ', chatId
