@@ -27,24 +27,87 @@ SOFTWARE.
 package main
 
 import (
-	"context"
+	"bytes"
 	"fmt"
-	"log"
-	"net/url"
-	"strings"
-	"time"
-
 	"github.com/influxdata/influxdb1-client/v2"
 	"github.com/spf13/viper"
+	"log"
+	"net/url"
+	"os"
+	"reflect"
+	"strings"
+	"text/template"
 )
 
 func main() {
+	setDefaults()
+	readConfiguration()
+
+	influxClient := createInfluxClient()
+
+	sendPingToInflux(influxClient)
+	createDatabaseIfNotExist(influxClient)
+
+	hosts := viper.GetStringSlice("hosts")
+	fpingConfig := prepareFpingConfiguration()
+
+	log.Printf("Launching fping with hosts: %s", strings.Join(hosts, ", "))
+	err := runAndRead(hosts, influxClient, fpingConfig)
+
+	if err != nil {
+		log.Fatal("Failed when obtaining and storing pings", err)
+	}
+}
+
+
+type prefixTemplateParams struct {
+	Hostname string
+	ReverseHostname string
+}
+
+func parsePrefixTemplate(tplString string) (string, error) {
+	tpl, err := template.New("prefix-template").Parse(tplString)
+	if err != nil {
+		return "", err
+	}
+
+	params := prefixTemplateParams{}
+	params.Hostname, err = os.Hostname()
+	params.Hostname = strings.ToLower(params.Hostname)
+	if err != nil {
+		return "", err
+	}
+
+	splitHostname := strings.Split(params.Hostname, ".")
+	reverseAny(splitHostname)
+	params.ReverseHostname = strings.Join(splitHostname, ".")
+
+	out := bytes.NewBufferString("")
+	err = tpl.Execute(out, params)
+	if err != nil {
+		return "", err
+	}
+
+	return out.String(), nil
+}
+
+func reverseAny(s interface{}) {
+	// https://stackoverflow.com/questions/28058278/how-do-i-reverse-a-slice-in-go
+	n := reflect.ValueOf(s).Len()
+	swap := reflect.Swapper(s)
+	for i, j := 0, n - 1; i < j; i, j = i + 1, j - 1 {
+		swap(i, j)
+	}
+}
+
+func setDefaults() {
 	viper.SetDefault("influx.host", "localhost")
 	viper.SetDefault("influx.port", "8086")
 	viper.SetDefault("influx.user", "")
 	viper.SetDefault("influx.pass", "")
 	viper.SetDefault("influx.secure", false)
 	viper.SetDefault("influx.db", "infping")
+	viper.SetDefault("influx.measurement", "infping")
 	viper.SetDefault("fping.backoff", "1")
 	viper.SetDefault("fping.retries", "0")
 	viper.SetDefault("fping.tos", "0")
@@ -52,7 +115,9 @@ func main() {
 	viper.SetDefault("fping.period", "1000")
 	viper.SetDefault("fping.custom", map[string]string{})
 	viper.SetDefault("hosts", []string{"localhost"})
+}
 
+func readConfiguration() {
 	viper.SetConfigName("infping")
 	viper.AddConfigPath("/etc/")
 	viper.AddConfigPath("/usr/local/etc/")
@@ -61,29 +126,36 @@ func main() {
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatal("Unable to read config file", err)
 	}
+}
 
+func createInfluxClient() *InfluxClient {
 	influxScheme := "https"
 	if !viper.GetBool("influx.secure") {
 		influxScheme = "http"
 	}
+
 	influxHost := viper.GetString("influx.host")
 	influxPort := viper.GetString("influx.port")
 	influxUser := viper.GetString("influx.user")
 	influxPass := viper.GetString("influx.pass")
 	influxDB := viper.GetString("influx.db")
+	influxMeasurement, err := parsePrefixTemplate(viper.GetString("influx.measurement"))
 	influxRetPolicy := viper.GetString("influx.policy")
 
-	hosts := viper.GetStringSlice("hosts")
+	if err != nil {
+		log.Fatal("Unable to parse measurement template", err)
+	}
 
 	u, err := url.Parse(fmt.Sprintf("%s://%s:%s", influxScheme, influxHost, influxPort))
 	if err != nil {
 		log.Fatal("Unable to build valid Influx URL", err)
 	}
 
-	conf := client.HTTPConfig{
-		Addr:     u.String(),
-		Username: influxUser,
-		Password: influxPass,
+	conf := client.HTTPConfig {
+		Addr:      u.String(),
+		Username:  influxUser,
+		Password:  influxPass,
+		UserAgent: "infping",
 	}
 
 	rawClient, err := client.NewHTTPClient(conf)
@@ -91,17 +163,20 @@ func main() {
 		log.Fatal("Failed to create Influx client", err)
 	}
 
-	influxClient := NewInfluxClient(rawClient, influxDB, influxRetPolicy)
+	return NewInfluxClient(rawClient, influxDB, influxMeasurement, influxRetPolicy)
+}
 
+func sendPingToInflux(influxClient *InfluxClient) {
 	dur, version, err := influxClient.Ping()
 	if err != nil {
 		log.Fatal("Unable to ping InfluxDB", err)
 	}
 	log.Printf("Pinged InfluxDB (version %s) in %v", version, dur)
+}
 
-	q := client.Query{
-		Command: "SHOW DATABASES",
-	}
+func createDatabaseIfNotExist(influxClient *InfluxClient) {
+	influxDB := viper.GetString("influx.db")
+	q := client.Query { Command: "SHOW DATABASES" }
 	databases, err := influxClient.Query(q)
 	if err != nil {
 		log.Fatal("Unable to list databases", err)
@@ -112,12 +187,14 @@ func main() {
 	if len(databases.Results[0].Series) != 1 {
 		log.Fatalf("Expected 1 series in result, got %d", len(databases.Results[0].Series))
 	}
+
 	found := false
 	for i := 0; i < len(databases.Results[0].Series[0].Values); i++ {
 		if databases.Results[0].Series[0].Values[i][0] == influxDB {
 			found = true
 		}
 	}
+
 	if !found {
 		q = client.Query{
 			Command: fmt.Sprintf("CREATE DATABASE %s", influxDB),
@@ -128,10 +205,9 @@ func main() {
 		}
 		log.Printf("Created new database %s", influxDB)
 	}
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
+func prepareFpingConfiguration() map[string]string {
 	fpingBackoff := viper.GetString("fping.backoff")
 	fpingRetries := viper.GetString("fping.retries")
 	fpingTos := viper.GetString("fping.tos")
@@ -146,11 +222,11 @@ func main() {
 		"-l": "",
 		"-D": "",
 	}
+
 	fpingCustom := viper.GetStringMapString("fping.custom")
 	for k, v := range fpingCustom {
 		fpingConfig[k] = v
 	}
 
-	log.Printf("Launching fping with hosts: %s", strings.Join(hosts, ", "))
-	runAndRead(ctx, hosts, influxClient, fpingConfig)
+	return fpingConfig
 }

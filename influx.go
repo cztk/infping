@@ -38,20 +38,22 @@ type Client interface {
 }
 
 // NewInfluxClient creates a concrete InfluxDB Writer
-func NewInfluxClient(client client.Client, db, retPolicy string) *InfluxClient {
+func NewInfluxClient(client client.Client, db, measurement, retPolicy string) *InfluxClient {
 	return &InfluxClient{
-		influx:    client,
-		db:        db,
-		retPolicy: retPolicy,
+		influx:      client,
+		db:          db,
+		retPolicy:   retPolicy,
+		measurement: measurement,
 	}
 }
 
 // InfluxClient implements the Client interface to provide a metrics client
 // backed by InfluxDB
 type InfluxClient struct {
-	influx    client.Client
-	db        string
-	retPolicy string
+	influx      client.Client
+	db          string
+	retPolicy   string
+	measurement string
 }
 
 // Ping calls Ping on the underlying influx client
@@ -79,14 +81,16 @@ func (i *InfluxClient) Write(point Point) error {
 			"loss": point.LossPercent,
 		}
 	}
+
 	pt, err := client.NewPoint(
-		"ping",
+		i.measurement,
 		map[string]string{
 			"rx_host": point.RxHost,
 			"tx_host": point.TxHost,
 		},
 		fields,
-		point.Time)
+		point.Time,
+	)
 
 	if err != nil {
 		return err
@@ -97,6 +101,7 @@ func (i *InfluxClient) Write(point Point) error {
 	if err != nil {
 		return err
 	}
+
 	bp.AddPoint(pt)
 	if i.retPolicy != "" {
 		bp.SetRetentionPolicy(i.retPolicy)

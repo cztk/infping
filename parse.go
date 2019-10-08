@@ -26,7 +26,6 @@ package main
 
 import (
 	"bufio"
-	"context"
 	"log"
 	"os"
 	"os/exec"
@@ -36,7 +35,7 @@ import (
 )
 
 var hostname = mustHostname()
-var last_time = time.Now()
+var lastTime = time.Now()
 
 // Point represents the fping results for a single host
 type Point struct {
@@ -50,7 +49,38 @@ type Point struct {
 }
 
 // runAndRead executes fping, parses the output into a Point, and then writes it to Influx
-func runAndRead(ctx context.Context, hosts []string, con Client, fpingConfig map[string]string) error {
+func runAndRead(hosts []string, con Client, fpingConfig map[string]string) error {
+	runner, err := createRunner(hosts, fpingConfig)
+	if err != nil {
+		return err
+	}
+
+	stderr, err := runner.StderrPipe()
+	if err != nil {
+		return err
+	}
+
+	err = runner.Start()
+	if err != nil {
+		return err
+	}
+
+	buff := bufio.NewScanner(stderr)
+	for buff.Scan() {
+		text := buff.Text()
+		fields := strings.Fields(text)
+
+		if len(fields) == 1 {
+			handleInvalidOutput(fields)
+		} else {
+			handleValidOutput(fields, con)
+		}
+	}
+
+	return nil
+}
+
+func createRunner(hosts []string, fpingConfig map[string]string) (*exec.Cmd, error) {
 	args := []string(nil)
 	for k, v := range fpingConfig {
 		args = append(args, k, v)
@@ -60,52 +90,52 @@ func runAndRead(ctx context.Context, hosts []string, con Client, fpingConfig map
 	}
 	cmd, err := exec.LookPath("fping")
 	if err != nil {
-		return err
+		return nil, err
 	}
-	runner := exec.Command(cmd, args...)
-	stderr, err := runner.StderrPipe()
+	return exec.Command(cmd, args...), nil
+}
+
+func handleInvalidOutput(fields []string) {
+	tm := strings.TrimLeft(fields[0], "[")
+	tm = strings.TrimRight(tm, "]")
+	parsed, err := time.Parse("15:04:05", tm)
 	if err != nil {
-		return err
+		log.Printf("Failed to parse time %s: %s", tm, err)
+	} else {
+		now := time.Now()
+		lastTime = time.Date(now.Year(), now.Month(), now.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), 0, time.Local)
 	}
-	runner.Start()
+}
 
-	buff := bufio.NewScanner(stderr)
-	for buff.Scan() {
-		text := buff.Text()
-		fields := strings.Fields(text)
+func handleValidOutput(fields []string, con Client) {
+	host := fields[0]
+	data := fields[4]
+	dataSplit := strings.Split(data, "/")
+	// Remove ,
+	dataSplit[2] = strings.TrimRight(dataSplit[2], "%,")
 
-		if len(fields) == 1 {
-			tm := strings.TrimLeft(fields[0], "[")
-			tm = strings.TrimRight(tm, "]")
-			parsed, err := time.Parse("15:04:05", tm)
-			if err != nil {
-				log.Printf("Failed to parse time %s: %s", tm, err)
-			} else {
-				now := time.Now()
-				last_time = time.Date(now.Year(), now.Month(), now.Day(), parsed.Hour(), parsed.Minute(), parsed.Second(), 0, time.Local)
-			}
-		} else {
-			host := fields[0]
-			data := fields[4]
-			dataSplitted := strings.Split(data, "/")
-			// Remove ,
-			dataSplitted[2] = strings.TrimRight(dataSplitted[2], "%,")
-			lossp := mustInt(dataSplitted[2])
-			min, max, avg := 0.0, 0.0, 0.0
-			// Ping times
-			if len(fields) > 5 {
-				times := fields[7]
-				td := strings.Split(times, "/")
-				min, avg, max = mustFloat(td[0]), mustFloat(td[1]), mustFloat(td[2])
-			}
-			pt := Point{RxHost: host, Min: min, Max: max, Avg: avg, LossPercent: lossp, Time: last_time}
-			pt.TxHost = hostname
-			if err := con.Write(pt); err != nil {
-				log.Printf("Error writing data point: %s", err)
-			}
-		}
+	lossp := mustInt(dataSplit[2])
+	min, max, avg := 0.0, 0.0, 0.0
+
+	// Ping times
+	if len(fields) > 5 {
+		times := fields[7]
+		td := strings.Split(times, "/")
+		min, avg, max = mustFloat(td[0]), mustFloat(td[1]), mustFloat(td[2])
 	}
-	return nil
+
+	pt := Point {
+		TxHost:      hostname,
+		RxHost:      host,
+		Min:         min,
+		Max:         max,
+		Avg:         avg,
+		LossPercent: lossp,
+		Time:        lastTime,
+	}
+	if err := con.Write(pt); err != nil {
+		log.Printf("Error writing data point: %s", err)
+	}
 }
 
 // mustInt ensures the string contains an integer, returning 0 if not
@@ -132,5 +162,5 @@ func mustHostname() string {
 	if err != nil {
 		panic("unable to find hostname " + err.Error())
 	}
-	return name
+	return strings.ToLower(name)
 }
