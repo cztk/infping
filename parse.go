@@ -27,14 +27,12 @@ package main
 import (
 	"bufio"
 	"log"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 )
 
-var hostname = mustHostname()
 var lastTime = time.Now()
 
 // Point represents the fping results for a single host
@@ -49,7 +47,7 @@ type Point struct {
 }
 
 // runAndRead executes fping, parses the output into a Point, and then writes it to Influx
-func runAndRead(hosts []string, con Client, fpingConfig map[string]string) error {
+func runAndRead(hosts []string, con Client, fpingConfig map[string]string, hostname string) error {
 	runner, err := createRunner(hosts, fpingConfig)
 	if err != nil {
 		return err
@@ -73,7 +71,7 @@ func runAndRead(hosts []string, con Client, fpingConfig map[string]string) error
 		if len(fields) == 1 {
 			handleInvalidOutput(fields)
 		} else {
-			handleValidOutput(fields, con)
+			handleValidOutput(fields, con, hostname)
 		}
 	}
 
@@ -107,7 +105,7 @@ func handleInvalidOutput(fields []string) {
 	}
 }
 
-func handleValidOutput(fields []string, con Client) {
+func handleValidOutput(fields []string, con Client, hostname string) {
 	host := fields[0]
 	data := fields[4]
 	dataSplit := strings.Split(data, "/")
@@ -156,11 +154,3 @@ func mustFloat(data string) float64 {
 	return flt
 }
 
-// mustHostname returns the local hostname or throws an error
-func mustHostname() string {
-	name, err := os.Hostname()
-	if err != nil {
-		panic("unable to find hostname " + err.Error())
-	}
-	return strings.ToLower(name)
-}

@@ -49,10 +49,11 @@ func main() {
 	createDatabaseIfNotExist(influxClient)
 
 	hosts := viper.GetStringSlice("hosts")
+	hostname := viper.GetString("hostname")
 	fpingConfig := prepareFpingConfiguration()
 
 	log.Printf("Launching fping with hosts: %s", strings.Join(hosts, ", "))
-	err := runAndRead(hosts, influxClient, fpingConfig)
+	err := runAndRead(hosts, influxClient, fpingConfig, hostname)
 
 	if err != nil {
 		log.Fatal("Failed when obtaining and storing pings", err)
@@ -72,11 +73,7 @@ func parsePrefixTemplate(tplString string) (string, error) {
 	}
 
 	params := prefixTemplateParams{}
-	params.Hostname, err = os.Hostname()
-	params.Hostname = strings.ToLower(params.Hostname)
-	if err != nil {
-		return "", err
-	}
+	params.Hostname = strings.ToLower(viper.GetString("hostname"))
 
 	splitHostname := strings.Split(params.Hostname, ".")
 	reverseAny(splitHostname)
@@ -115,6 +112,7 @@ func setDefaults() {
 	viper.SetDefault("fping.period", "1000")
 	viper.SetDefault("fping.custom", map[string]string{})
 	viper.SetDefault("hosts", []string{"localhost"})
+	viper.SetDefault("hostname", mustHostname())
 }
 
 func readConfiguration() {
@@ -229,4 +227,13 @@ func prepareFpingConfiguration() map[string]string {
 	}
 
 	return fpingConfig
+}
+
+// mustHostname returns the local hostname or throws an error
+func mustHostname() string {
+	name, err := os.Hostname()
+	if err != nil {
+		panic("unable to find hostname " + err.Error())
+	}
+	return strings.ToLower(name)
 }
