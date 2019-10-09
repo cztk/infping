@@ -120,6 +120,7 @@ pipeline {
             }
 
             stage ('Push') {
+              when { branch 'master' }
               steps {
                 pushDockerImage(img, arch, tag)
               }
@@ -154,6 +155,7 @@ pipeline {
             }
 
             stage ('Push') {
+              when { branch 'master' }              
               steps {
                 pushDockerImage(img, arch, tag)
               }
@@ -188,6 +190,7 @@ pipeline {
             }
 
             stage ('Push') {
+              when { branch 'master' }              
               steps {
                 pushDockerImage(img, arch, tag)
               }
@@ -201,6 +204,7 @@ pipeline {
       agent {
         label 'docker-qemu'
       }
+      when { branch 'master' }
 
       steps {
         script {
@@ -304,6 +308,7 @@ pipeline {
 
   stage ('Get Git Tag') {
     agent { label 'majorcadevs' }
+    when { branch 'master' }
     steps {
       getGitTag()
     }
@@ -312,6 +317,7 @@ pipeline {
   stage('Upload Release to Github') {
       agent { label 'majorcadevs' }
       when {
+        branch 'master'
         expression {
           GIT_TAG != null && GIT_TAG != ''
         }
