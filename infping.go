@@ -118,6 +118,7 @@ func setDefaults() {
 func readConfiguration() {
 	viper.SetConfigName("infping")
 	viper.AddConfigPath("/etc/")
+	viper.AddConfigPath("/etc/infping/")
 	viper.AddConfigPath("/usr/local/etc/")
 	viper.AddConfigPath("/config/")
 	viper.AddConfigPath(".")
