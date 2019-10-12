@@ -11,6 +11,8 @@ This program uses the [Viper configuration package](https://github.com/spf13/vip
 * **pass**: The password, if needed
 * **db**: The database name to connect to – this will be created if it does not exist
 * **secure**: Set to true to enable HTTPS
+* **measurement**:  Measurement name, if needed - by default "infping"
+* **policy**: Retention policy to use (by default uses influx's default retention) - must be created [manually](https://docs.influxdata.com/influxdb/v1.7/query_language/database_management/#create-retention-policies-with-create-retention-policy)
 
 ### fping
 * **backoff**: The value for the `-B` argument
@@ -21,6 +23,9 @@ This program uses the [Viper configuration package](https://github.com/spf13/vip
 
 ### hosts
 * **hosts**: An array of hostnames to ping
+
+### hostname
+* **hostname**: Manual specification of the host (tx_host) - by default gets the os hostname
 
 # Influx Storage
 Data is stored in Influx with the following fields and tags:
@@ -40,6 +45,8 @@ docker run -v /local/infping.json:/config/infping.json $IMAGE
 ```
 
 It will automatically detect the configuration in `/config`. For best results, assign a hostname, otherwise you'll end up with one that doesn't make much sense
+
+We also have a docker-compose file at `/docker/docker-compose.yml` with a reference to run this service.
 
 # Grafana Dashboard
 A sample Grafana dashboard is included, that plots all four of the collected ping statistics in something approximating the display of [Smokeping](https://smokeping.org/). Simply create a datasource named "infping" pointing to Influx, and then import this dashboard. The `hostname` variable will be automatically populated with all the host names found in the database, and can be used to select different graphs.
