@@ -120,6 +120,7 @@ func readConfiguration() {
 	viper.AddConfigPath("/etc/")
 	viper.AddConfigPath("/etc/infping/")
 	viper.AddConfigPath("/usr/local/etc/")
+	viper.AddConfigPath("/usr/local/etc/infping/")
 	viper.AddConfigPath("/config/")
 	viper.AddConfigPath(".")
 	if err := viper.ReadInConfig(); err != nil {
