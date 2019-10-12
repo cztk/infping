@@ -1,0 +1,9 @@
+version: '3.7'
+services:
+  infping:
+    image: amgxv/infping
+    volumes:
+      - ./infping.yaml:/etc/infping.yaml
+    hostname: infping-docker-mikeli
+    restart: always
+
