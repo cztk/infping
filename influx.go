@@ -96,6 +96,8 @@ func (i *InfluxClient) Write(point Point) error {
 		p := influxdb2.NewPointWithMeasurement(i.measurement).
 			AddTag("tx_host", point.TxHost).
 			AddTag("rx_host", point.RxHost).
+			AddField("tx_host", point.TxHost).
+			AddField("rx_host", point.RxHost).
 			AddField("loss", point.LossPercent).
 			SetTime(time.Now())
 		addTags(p, i.tags)
