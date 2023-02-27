@@ -1,0 +1,16 @@
+[Unit]
+
+Description=feed influxdb with fping data
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=infping
+Group=infping
+Type=simple
+WorkingDirectory=/usr/local/bin/infping
+ExecStart=/usr/local/bin/infping/infping
+
+[Install]
+
+WantedBy=multi-user.target
