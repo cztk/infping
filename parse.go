@@ -5,7 +5,7 @@ Copyright (c) 2017 Nicholas Van Wiggeren  https://github.com/nickvanw/infping
 Copyright (c) 2018 Michael Newton         https://github.com/miken32/infping
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal 
+of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
 to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
 copies of the Software, and to permit persons to whom the Software is
@@ -47,7 +47,7 @@ type Point struct {
 }
 
 // runAndRead executes fping, parses the output into a Point, and then writes it to Influx
-func runAndRead(hosts []string, con Client, fpingConfig map[string]string, hostname string) error {
+func runAndRead(hosts []string, con *InfluxClient, fpingConfig map[string]string, hostname string) error {
 	runner, err := createRunner(hosts, fpingConfig)
 	if err != nil {
 		return err
@@ -122,7 +122,7 @@ func handleValidOutput(fields []string, con Client, hostname string) {
 		min, avg, max = mustFloat(td[0]), mustFloat(td[1]), mustFloat(td[2])
 	}
 
-	pt := Point {
+	pt := Point{
 		TxHost:      hostname,
 		RxHost:      host,
 		Min:         min,
@@ -153,4 +153,3 @@ func mustFloat(data string) float64 {
 	}
 	return flt
 }
-
